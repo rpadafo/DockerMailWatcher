@@ -1,15 +1,15 @@
 #!/bin/sh
 
-# Usar el puerto por defecto 465 si no se especifica
+# 465 port if is empty in environment variables
 SMTP_PORT=${SMTP_PORT:-465}
-SUBJECT_PREFIX=${SUBJECT_PREFIX:-"[Colmena]"}
+SUBJECT_PREFIX=${SUBJECT_PREFIX:-"[Alert]"}
 
 NOW=$(date '+%d/%m/%Y %H:%M:%S')
 echo "[$NOW] Starting docker mail watcher..."
 echo "[$NOW] SMTP Server: $SMTP_SERVER:$SMTP_PORT"
 echo "[$NOW] Notifications to: $SMTP_TO"
 
-# Escuchar eventos del socket de Docker
+# Listen events from Docker socket
 docker events --filter 'type=container' --filter 'event=die' --filter 'event=oom' --format '{{.Actor.Attributes.name}}' | while read -r container; do
   NOW=$(date '+%d/%m/%Y %H:%M:%S')
   echo "[$NOW] Event detected in '$container'. Sending email to $SMTP_TO..."
