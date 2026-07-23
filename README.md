@@ -18,6 +18,4 @@
 
 ## 🚀 Quick Start
 
-### 1. Get the Template
-
 Inside this repository, you will find a template file named `docker-compose_EXAMPLE.yaml`. You can rename or copy it to `docker-compose.yml`:
