@@ -1,0 +1,34 @@
+name: Build and Publish Docker Image
+
+on:
+  push:
+    branches: [ "main" ]
+
+jobs:
+  build:
+    runs-on: alpine-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile # Asegúrate de poner conf/Dockerfile si lo moviste ahí
+          push: true
+          # Aquí creamos las dos etiquetas a la vez:
+          tags: |
+            ghcr.io/${{ github.actor }}/dockermailwatcher:latest
+            ghcr.io/${{ github.actor }}/dockermailwatcher:v26.0.${{ github.run_number }}
