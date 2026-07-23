@@ -1,0 +1,33 @@
+services:
+  docker-mail-watcher:
+    image: ghcr.io/rpadafo/DockerMailWatcher:latest
+    container_name: dockermailwatcher
+    restart: unless-stopped
+    environment:
+      - TZ=Europe/Madrid
+      - SMTP_SERVER=smtp.server.tld
+      - SMTP_PORT=465
+      - SMTP_USER=user@server.tld
+      - SMTP_PASS=xxxxxxxxxxxxxxxxxxxxx
+      - SMTP_FROM=user@server.tld
+      - SMTP_FROM_NAME=Docker Alert
+      - SMTP_TO=destiny@server.tld
+      - SUBJECT_PREFIX=[ALERT]
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    #Optional >>>
+    networks:
+        default:
+            ipv4_address: 192.168.1.xx
+            mac_address: "02:42:C0:xx:xx:xx"
+    deploy:
+        resources:
+            limits:
+                cpus: '1'
+                memory: 60M
+    dns:
+        - 8.8.8.8
+networks:
+    default:
+        external: true
+#Optional <<
