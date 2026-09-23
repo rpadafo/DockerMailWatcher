@@ -39,17 +39,34 @@ while true; do
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        export DOCKER_CLI_EXPERIMENTAL=enabled
+        # 1. Obtener la ID de la imagen que está corriendo localmente
+        local_image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
+        [ -z "$local_image_id" ] && continue
 
-        remote_digest=$(docker manifest inspect "$image" 2>/dev/null | jq -r '.manifests[0].digest // .config.digest // empty' 2>/dev/null)
+        # 2. Obtener el RepoDigest o ID local de la imagen montada
+        local_digest=$(docker image inspect "$local_image_id" --format='{{index .RepoDigests 0}}' 2>/dev/null)
 
+        # 3. Obtener el Digest de la imagen remota mediante 'docker buildx imagetools'
+        remote_digest=$(docker buildx imagetools inspect "$image" --raw 2>/dev/null | jq -r '.manifests[0].digest // .config.digest // empty' 2>/dev/null)
+
+        # Si no pudimos obtener con buildx, intentamos la consulta directa del manifiesto (fallback)
+        if [ -z "$remote_digest" ]; then
+            remote_digest=$(docker manifest inspect "$image" 2>/dev/null | jq -r '.config.digest // empty' 2>/dev/null)
+        fi
+
+        # 4. Comprobación segura
         if [ -n "$remote_digest" ]; then
-            is_updated=$(docker inspect "$name" --format='{{index .RepoDigests 0}}' 2>/dev/null | grep "$remote_digest")
+            # Comparamos si el digest remoto está contenido en la imagen o RepoDigest local
+            is_match=$(docker image inspect "$local_image_id" 2>/dev/null | grep -i "$remote_digest")
 
-            if [ -z "$is_updated" ]; then
+            if [ -z "$is_match" ]; then
                 echo "[$NOW] Update available for container '$name' (Image: $image)"
                 send_email "$name" "$image" &
+            else
+                echo "[$NOW] Container '$name' is UP TO DATE."
             fi
+        else
+            echo "[$NOW] Could not fetch remote manifest for '$image'."
         fi
     done
 
