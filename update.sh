@@ -1,7 +1,7 @@
 #!/bin/sh
 
 SMTP_PORT=${SMTP_PORT:-465}
-SUBJECT_PREFIX=${SUBJECT_PREFIX:-"[Update]"}
+SUBJECT_PREFIX=${SUBJECT_PREFIX_UPDATE:-"[Update]"}
 CHECK_INTERVAL=${CHECK_INTERVAL:-86400} # Por defecto revisa cada 24 horas
 
 NOW=$(date '+%d/%m/%Y %H:%M:%S')
