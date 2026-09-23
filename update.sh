@@ -34,52 +34,37 @@ while true; do
     NOW=$(date '+%d/%m/%Y %H:%M:%S')
     echo "[$NOW] Checking for Docker image updates..."
 
-    # Obtener lista de contenedores y sus imágenes
     containers=$(docker ps --format '{{.Names}}|{{.Image}}')
 
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        # Normalizar el nombre de la imagen para Docker Hub si no incluye dominio
-        full_image="$image"
-        case "$full_image" in
-            */*) ;;
-            *) full_image="docker.io/library/$full_image" ;;
-        esac
+        # 1. Obtener la ID (sha256) exacta de la imagen que está usando el contenedor en ejecución
+        running_image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
+        [ -z "$running_image_id" ] && continue
 
-        # 1. Obtener el RepoDigest actual del contenedor local (ej. sha256:abc...)
-        local_repo_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$name" 2>/dev/null)
-
-        # Si local_repo_digest está vacío, se busca a través de la ID de la imagen
-        if [ -z "$local_repo_digest" ]; then
-            image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
-            local_repo_digest=$(docker image inspect "$image_id" --format='{{index .RepoDigests 0}}' 2>/dev/null)
-        fi
-
-        # Si no tenemos RepoDigest local, saltamos
-        if [ -z "$local_repo_digest" ]; then
-            echo "[$NOW] Skipping '$name': No local RepoDigest found."
+        # 2. Hacer pull de la imagen delegando todo el trabajo al Daemon local.
+        # Silenciamos la salida para no ensuciar el log. Si la imagen no ha cambiado, no descarga nada.
+        docker pull "$image" > /dev/null 2>&1
+        
+        if [ $? -ne 0 ]; then
+            echo "[$NOW] Warning: Could not pull/check remote image for '$name' ($image)."
             continue
         fi
 
-        # Extraer solo el hash SHA256 local
-        local_hash=$(echo "$local_repo_digest" | sed -n 's/.*sha256:\([a-f0-9]\{64\}\).*/\1/p')
+        # 3. Obtener la ID (sha256) de la imagen de ese tag que está guardada ahora en el disco local
+        latest_image_id=$(docker image inspect --format='{{.Id}}' "$image" 2>/dev/null)
 
-        # 2. Consultar el manifiesto remoto usando 'docker manifest inspect'
-        export DOCKER_CLI_EXPERIMENTAL=enabled
-        manifest_output=$(docker manifest inspect "$full_image" 2>/dev/null)
-
-        if [ -z "$manifest_output" ]; then
-            echo "[$NOW] Warning: Could not fetch remote manifest for '$name' ($image)."
-            continue
-        fi
-
-        # 3. Comprobar si el hash local existe en la respuesta del manifiesto remoto
-        if echo "$manifest_output" | grep -q "$local_hash"; then
-            echo "[$NOW] Container '$name' is UP TO DATE."
+        if [ -n "$latest_image_id" ]; then
+            # 4. Si las IDs son diferentes, significa que el pull trajo una imagen nueva
+            if [ "$running_image_id" != "$latest_image_id" ]; then
+                echo "[$NOW] Update available for container '$name' (Image: $image)"
+                send_email "$name" "$image" &
+            else
+                echo "[$NOW] Container '$name' is UP TO DATE."
+            fi
         else
-            echo "[$NOW] Update available for container '$name' (Image: $image)"
-            send_email "$name" "$image" &
+            echo "[$NOW] Warning: Could not resolve latest image ID for '$name'."
         fi
     done
 
