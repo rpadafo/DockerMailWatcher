@@ -39,36 +39,32 @@ while true; do
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        # --- NORMALIZAR EL NOMBRE DE LA IMAGEN PARA SKOPEO ---
-        # Skopeo requiere el formato completo con dominio (ej. docker.io/...)
+        # --- NORMALIZAR EL NOMBRE DE LA IMAGEN ---
         case "$image" in
             */*)
-                # Tiene un slash, comprobamos si la primera parte es un dominio
                 first_part=$(echo "$image" | cut -d'/' -f1)
                 case "$first_part" in
-                    *.*) full_image="$image" ;; # Ya tiene dominio (ej. ghcr.io, lscr.io)
-                    *) full_image="docker.io/$image" ;; # Docker Hub con usuario (ej. openthread/border-router)
+                    *.*) full_image="$image" ;; 
+                    *) full_image="docker.io/$image" ;; 
                 esac
                 ;;
-            *)
-                # No tiene slash, es oficial de Docker Hub (ej. eclipse-mosquitto, ubuntu)
-                full_image="docker.io/library/$image"
-                ;;
+            *) full_image="docker.io/library/$image" ;;
         esac
 
-        # 1. Obtener la lista de hashes (RepoDigests) locales
+        # 1. Obtener la lista de hashes locales
         local_repo_digests=$(docker inspect --format='{{json .RepoDigests}}' "$name" 2>/dev/null)
-        
         if [ "$local_repo_digests" = "[]" ] || [ -z "$local_repo_digests" ] || [ "$local_repo_digests" = "null" ]; then
             image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
             local_repo_digests=$(docker image inspect --format='{{json .RepoDigests}}' "$image_id" 2>/dev/null)
         fi
 
-        # 2. Consultar el Hash remoto usando la URL normalizada (full_image)
-        remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$full_image" 2>/dev/null)
+        # 2. Consultar el Hash remoto y CAPTURAR EL ERROR EXACTO
+        skopeo_output=$(skopeo inspect --format '{{.Digest}}' "docker://$full_image" 2>&1)
+        skopeo_status=$?
 
-        # 3. Comprobación segura
-        if [ -n "$remote_digest" ]; then
+        # 3. Evaluar el resultado
+        if [ $skopeo_status -eq 0 ]; then
+            remote_digest="$skopeo_output"
             if [ "$local_repo_digests" != "[]" ] && [ -n "$local_repo_digests" ] && [ "$local_repo_digests" != "null" ]; then
                 if echo "$local_repo_digests" | grep -q "$remote_digest"; then
                     echo "[$NOW] Container '$name' is UP TO DATE."
@@ -80,7 +76,10 @@ while true; do
                 echo "[$NOW] Warning: No local RepoDigest for '$name'. Cannot compare safely."
             fi
         else
-            echo "[$NOW] Warning: Could not fetch remote digest via Skopeo for '$name' ($full_image)."
+            # Si falla, imprimimos exactamente por qué falló
+            # Usamos 'tr' para quitar saltos de línea y que el log quede limpio en una sola línea
+            clean_error=$(echo "$skopeo_output" | tr '\n' ' ')
+            echo "[$NOW] Error fetching digest for '$name': $clean_error"
         fi
     done
 
