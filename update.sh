@@ -39,23 +39,37 @@ while true; do
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        # 1. Obtener la lista de hashes (RepoDigests) que el contenedor tiene registrados localmente
+        # --- NORMALIZAR EL NOMBRE DE LA IMAGEN PARA SKOPEO ---
+        # Skopeo requiere el formato completo con dominio (ej. docker.io/...)
+        case "$image" in
+            */*)
+                # Tiene un slash, comprobamos si la primera parte es un dominio
+                first_part=$(echo "$image" | cut -d'/' -f1)
+                case "$first_part" in
+                    *.*) full_image="$image" ;; # Ya tiene dominio (ej. ghcr.io, lscr.io)
+                    *) full_image="docker.io/$image" ;; # Docker Hub con usuario (ej. openthread/border-router)
+                esac
+                ;;
+            *)
+                # No tiene slash, es oficial de Docker Hub (ej. eclipse-mosquitto, ubuntu)
+                full_image="docker.io/library/$image"
+                ;;
+        esac
+
+        # 1. Obtener la lista de hashes (RepoDigests) locales
         local_repo_digests=$(docker inspect --format='{{json .RepoDigests}}' "$name" 2>/dev/null)
         
-        # Si está vacío, intentamos sacarlo de la ID de la imagen base
         if [ "$local_repo_digests" = "[]" ] || [ -z "$local_repo_digests" ] || [ "$local_repo_digests" = "null" ]; then
             image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
             local_repo_digests=$(docker image inspect --format='{{json .RepoDigests}}' "$image_id" 2>/dev/null)
         fi
 
-        # 2. Consultar el Hash remoto de la imagen SIN descargarla usando Skopeo
-        # (skopeo solo descarga un texto JSON de unos bytes)
-        remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$image" 2>/dev/null)
+        # 2. Consultar el Hash remoto usando la URL normalizada (full_image)
+        remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$full_image" 2>/dev/null)
 
         # 3. Comprobación segura
         if [ -n "$remote_digest" ]; then
             if [ "$local_repo_digests" != "[]" ] && [ -n "$local_repo_digests" ] && [ "$local_repo_digests" != "null" ]; then
-                # Si el hash remoto está en la lista de hashes locales, está actualizado
                 if echo "$local_repo_digests" | grep -q "$remote_digest"; then
                     echo "[$NOW] Container '$name' is UP TO DATE."
                 else
@@ -66,7 +80,7 @@ while true; do
                 echo "[$NOW] Warning: No local RepoDigest for '$name'. Cannot compare safely."
             fi
         else
-            echo "[$NOW] Warning: Could not fetch remote digest via Skopeo for '$name' ($image)."
+            echo "[$NOW] Warning: Could not fetch remote digest via Skopeo for '$name' ($full_image)."
         fi
     done
 
