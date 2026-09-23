@@ -1,7 +1,7 @@
 FROM alpine:latest
 
 # Instalar dependencias necesarias y zona horaria
-RUN apk add --no-cache docker-cli curl tzdata jq
+RUN apk add --no-cache docker-cli curl tzdata jq skopeo
 
 WORKDIR /app
 

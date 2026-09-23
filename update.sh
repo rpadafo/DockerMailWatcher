@@ -34,52 +34,39 @@ while true; do
     NOW=$(date '+%d/%m/%Y %H:%M:%S')
     echo "[$NOW] Checking for Docker image updates..."
 
-    # Obtener lista de contenedores y sus imágenes
     containers=$(docker ps --format '{{.Names}}|{{.Image}}')
 
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        # Normalizar el nombre de la imagen para Docker Hub si no incluye dominio
-        full_image="$image"
-        case "$full_image" in
-            */*) ;;
-            *) full_image="docker.io/library/$full_image" ;;
-        esac
-
-        # 1. Obtener el RepoDigest actual del contenedor local (ej. sha256:abc...)
-        local_repo_digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$name" 2>/dev/null)
-
-        # Si local_repo_digest está vacío, se busca a través de la ID de la imagen
-        if [ -z "$local_repo_digest" ]; then
+        # 1. Obtener la lista de hashes (RepoDigests) que el contenedor tiene registrados localmente
+        local_repo_digests=$(docker inspect --format='{{json .RepoDigests}}' "$name" 2>/dev/null)
+        
+        # Si está vacío, intentamos sacarlo de la ID de la imagen base
+        if [ "$local_repo_digests" = "[]" ] || [ -z "$local_repo_digests" ] || [ "$local_repo_digests" = "null" ]; then
             image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
-            local_repo_digest=$(docker image inspect "$image_id" --format='{{index .RepoDigests 0}}' 2>/dev/null)
+            local_repo_digests=$(docker image inspect --format='{{json .RepoDigests}}' "$image_id" 2>/dev/null)
         fi
 
-        # Si no tenemos RepoDigest local, saltamos
-        if [ -z "$local_repo_digest" ]; then
-            echo "[$NOW] Skipping '$name': No local RepoDigest found."
-            continue
-        fi
+        # 2. Consultar el Hash remoto de la imagen SIN descargarla usando Skopeo
+        # (skopeo solo descarga un texto JSON de unos bytes)
+        remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$image" 2>/dev/null)
 
-        # Extraer solo el hash SHA256 local
-        local_hash=$(echo "$local_repo_digest" | sed -n 's/.*sha256:\([a-f0-9]\{64\}\).*/\1/p')
-
-        # 2. Consultar el manifiesto remoto usando 'docker manifest inspect'
-        export DOCKER_CLI_EXPERIMENTAL=enabled
-        manifest_output=$(docker manifest inspect "$full_image" 2>/dev/null)
-
-        if [ -z "$manifest_output" ]; then
-            echo "[$NOW] Warning: Could not fetch remote manifest for '$name' ($image)."
-            continue
-        fi
-
-        # 3. Comprobar si el hash local existe en la respuesta del manifiesto remoto
-        if echo "$manifest_output" | grep -q "$local_hash"; then
-            echo "[$NOW] Container '$name' is UP TO DATE."
+        # 3. Comprobación segura
+        if [ -n "$remote_digest" ]; then
+            if [ "$local_repo_digests" != "[]" ] && [ -n "$local_repo_digests" ] && [ "$local_repo_digests" != "null" ]; then
+                # Si el hash remoto está en la lista de hashes locales, está actualizado
+                if echo "$local_repo_digests" | grep -q "$remote_digest"; then
+                    echo "[$NOW] Container '$name' is UP TO DATE."
+                else
+                    echo "[$NOW] Update available for container '$name' (Image: $image)"
+                    send_email "$name" "$image" &
+                fi
+            else
+                echo "[$NOW] Warning: No local RepoDigest for '$name'. Cannot compare safely."
+            fi
         else
-            echo "[$NOW] Update available for container '$name' (Image: $image)"
-            send_email "$name" "$image" &
+            echo "[$NOW] Warning: Could not fetch remote digest via Skopeo for '$name' ($image)."
         fi
     done
 
