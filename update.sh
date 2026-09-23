@@ -39,32 +39,34 @@ while true; do
     echo "$containers" | while IFS='|' read -r name image; do
         [ -z "$image" ] && continue
 
-        # 1. Obtener la ID (sha256) exacta de la imagen que está usando el contenedor en ejecución
-        running_image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
-        [ -z "$running_image_id" ] && continue
-
-        # 2. Hacer pull de la imagen delegando todo el trabajo al Daemon local.
-        # Silenciamos la salida para no ensuciar el log. Si la imagen no ha cambiado, no descarga nada.
-        docker pull "$image" > /dev/null 2>&1
+        # 1. Obtener la lista de hashes (RepoDigests) que el contenedor tiene registrados localmente
+        local_repo_digests=$(docker inspect --format='{{json .RepoDigests}}' "$name" 2>/dev/null)
         
-        if [ $? -ne 0 ]; then
-            echo "[$NOW] Warning: Could not pull/check remote image for '$name' ($image)."
-            continue
+        # Si está vacío, intentamos sacarlo de la ID de la imagen base
+        if [ "$local_repo_digests" = "[]" ] || [ -z "$local_repo_digests" ] || [ "$local_repo_digests" = "null" ]; then
+            image_id=$(docker inspect --format='{{.Image}}' "$name" 2>/dev/null)
+            local_repo_digests=$(docker image inspect --format='{{json .RepoDigests}}' "$image_id" 2>/dev/null)
         fi
 
-        # 3. Obtener la ID (sha256) de la imagen de ese tag que está guardada ahora en el disco local
-        latest_image_id=$(docker image inspect --format='{{.Id}}' "$image" 2>/dev/null)
+        # 2. Consultar el Hash remoto de la imagen SIN descargarla usando Skopeo
+        # (skopeo solo descarga un texto JSON de unos bytes)
+        remote_digest=$(skopeo inspect --format '{{.Digest}}' "docker://$image" 2>/dev/null)
 
-        if [ -n "$latest_image_id" ]; then
-            # 4. Si las IDs son diferentes, significa que el pull trajo una imagen nueva
-            if [ "$running_image_id" != "$latest_image_id" ]; then
-                echo "[$NOW] Update available for container '$name' (Image: $image)"
-                send_email "$name" "$image" &
+        # 3. Comprobación segura
+        if [ -n "$remote_digest" ]; then
+            if [ "$local_repo_digests" != "[]" ] && [ -n "$local_repo_digests" ] && [ "$local_repo_digests" != "null" ]; then
+                # Si el hash remoto está en la lista de hashes locales, está actualizado
+                if echo "$local_repo_digests" | grep -q "$remote_digest"; then
+                    echo "[$NOW] Container '$name' is UP TO DATE."
+                else
+                    echo "[$NOW] Update available for container '$name' (Image: $image)"
+                    send_email "$name" "$image" &
+                fi
             else
-                echo "[$NOW] Container '$name' is UP TO DATE."
+                echo "[$NOW] Warning: No local RepoDigest for '$name'. Cannot compare safely."
             fi
         else
-            echo "[$NOW] Warning: Could not resolve latest image ID for '$name'."
+            echo "[$NOW] Warning: Could not fetch remote digest via Skopeo for '$name' ($image)."
         fi
     done
 
