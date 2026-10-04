@@ -63,6 +63,7 @@ All configuration is done through environment variables in your `docker-compose.
 |---|---|---|
 | `ENABLE_CRASH_WATCHER` | ❌ | Enables the crash watcher, which listens to `die`/`oom` Docker events. Defaults to `true`. |
 | `ENABLE_UPDATE_WATCHER` | ❌ | Enables the update watcher, which periodically checks for newer container images. Defaults to `true`. |
+| `CRASH_DELAY_SECONDS` | ❌ | Seconds to wait after a `die`/`oom` event before checking whether the container is still stopped. If it is running again, the crash email is skipped. Defaults to `0` (no delay). |
 | `CHECK_INTERVAL` | ❌ | Interval, in seconds, between update checks performed by the update watcher. Defaults to `86400` (24 hours). |
 
 > ⚠️ At least one of the two watchers must remain enabled. If both `ENABLE_CRASH_WATCHER` and `ENABLE_UPDATE_WATCHER` are set to `false`, the container will log an error and exit.
@@ -81,7 +82,7 @@ These settings are entirely optional and can be removed if not needed.
 
 ## 🔍 How it works
 
-- **Crash watcher** (`watcher.sh`): subscribes to the Docker socket event stream and reacts instantly to `die` and `oom` events, sending an email for the affected container.
+- **Crash watcher** (`watcher.sh`): subscribes to the Docker socket event stream and reacts to `die` and `oom` events. After `CRASH_DELAY_SECONDS`, it sends an email only if the affected container is still stopped.
 - **Update watcher** (`update.sh`): every `CHECK_INTERVAL` seconds, inspects each running container's image digest and compares it against the digest published in its remote registry (via `skopeo`). If they differ, an update notification email is sent for that container.
 
 Both watchers run concurrently inside the same container and can be toggled independently via the environment variables above.
