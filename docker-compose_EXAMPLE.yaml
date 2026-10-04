@@ -16,6 +16,7 @@ services:
       - SUBJECT_PREFIX_UPDATE=[UPDATE]
       - ENABLE_CRASH_WATCHER=true    # Crash notifications
       - ENABLE_UPDATE_WATCHER=true   # Update notifications
+      - CRASH_DELAY_SECONDS=10 # Wait before sending crash notifications
       - CHECK_INTERVAL=86400 #Update interval checking updates
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

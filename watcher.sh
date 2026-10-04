@@ -2,6 +2,14 @@
 
 SMTP_PORT=${SMTP_PORT:-465}
 SUBJECT_PREFIX=${SUBJECT_PREFIX:-"[Alert]"}
+CRASH_DELAY_SECONDS=${CRASH_DELAY_SECONDS:-0}
+
+case "$CRASH_DELAY_SECONDS" in
+    ''|*[!0-9]*)
+        echo "Invalid CRASH_DELAY_SECONDS '$CRASH_DELAY_SECONDS'; using 0."
+        CRASH_DELAY_SECONDS=0
+        ;;
+esac
 
 NOW=$(date '+%d/%m/%Y %H:%M:%S')
 echo "[$NOW] Starting docker crash watcher..."
@@ -26,9 +34,30 @@ send_email() {
     fi
 }
 
+handle_crash() {
+    local container="$1"
+    local now
+    local running
+
+    if [ "$CRASH_DELAY_SECONDS" -gt 0 ]; then
+        sleep "$CRASH_DELAY_SECONDS"
+    fi
+
+    running=$(docker inspect --format '{{.State.Running}}' "$container" 2>/dev/null)
+    if [ "$running" = "true" ]; then
+        now=$(date '+%d/%m/%Y %H:%M:%S')
+        echo "[$now] Container '$container' is running again; crash alert skipped."
+        return
+    fi
+
+    now=$(date '+%d/%m/%Y %H:%M:%S')
+    echo "[$now] Container '$container' is still stopped. Sending email..."
+    send_email "$container"
+}
+
 # Listen events from Docker socket
 docker events --filter 'type=container' --filter 'event=die' --filter 'event=oom' --format '{{.Actor.Attributes.name}}' | while read -r container; do
     NOW=$(date '+%d/%m/%Y %H:%M:%S')
-    echo "[$NOW] Event detected in '$container'. Sending email..."
-    send_email "$container" &
+    echo "[$NOW] Event detected in '$container'. Checking again in ${CRASH_DELAY_SECONDS}s..."
+    handle_crash "$container" &
 done
